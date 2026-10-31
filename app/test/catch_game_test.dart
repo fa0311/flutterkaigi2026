@@ -257,4 +257,141 @@ void main() {
     expect(t.available, false);
     expect(t.x, 0);
   });
+
+  test('combo tiers, milestones and the best combo of a round', () {
+    expect(CatchGame.tierOf(0), 0);
+    expect(CatchGame.tierOf(2), 0);
+    expect(CatchGame.tierOf(3), 1);
+    expect(CatchGame.tierOf(5), 2);
+    expect(CatchGame.tierOf(8), 3);
+    expect(CatchGame.tierOf(10), 4);
+    expect(CatchGame.tierOf(99), 4);
+    final g = CatchGame()..start();
+    g.phase = Phase.playing;
+    g
+      ..goodTotal = 10
+      ..drops.clear();
+    expect(g.milestoneId, 0);
+    expect(g.fever, false);
+    for (var i = 0; i < 3; i++) {
+      g.drops.add(Drop(i, CanKind.superTry, 0, -3.1));
+    }
+    g.tick(1 / 60);
+    expect(g.combo, 3);
+    expect(g.comboTier, 1);
+    expect(g.milestoneId, 1);
+    expect(g.milestoneCombo, 3);
+    expect(g.bestCombo, 3);
+    expect(g.fever, false);
+    g.drops.addAll([
+      Drop(3, CanKind.light, 0, -3.1),
+      Drop(4, CanKind.superTry, 0, -3.1),
+    ]);
+    g.tick(1 / 60);
+    expect(g.combo, 5);
+    expect(g.comboTier, 2);
+    expect(g.milestoneId, 2);
+    expect(g.milestoneCombo, 5);
+    expect(g.fever, true);
+    // A bad catch ends the combo; the best of the round and the milestones
+    // reached stay.
+    g.drops.add(Drop(5, CanKind.happoshu, 0, -3.1));
+    g.tick(1 / 60);
+    expect(g.combo, 0);
+    expect(g.comboTier, 0);
+    expect(g.fever, false);
+    expect(g.bestCombo, 5);
+    expect(g.milestoneId, 2);
+    expect(g.inspect()['bestCombo'], 5);
+    g.start();
+    expect(g.bestCombo, 0);
+    expect(g.milestoneId, 0);
+    expect(g.milestoneCombo, 0);
+
+    // Practice keeps the combo at zero, so it never celebrates.
+    final practice = CatchGame()
+      ..practice = true
+      ..start();
+    practice.phase = Phase.playing;
+    practice.drops.clear();
+    for (var i = 0; i < 3; i++) {
+      practice.drops.add(Drop(i, CanKind.yumemin, 0, -3.1));
+    }
+    practice.tick(1 / 60);
+    expect(practice.combo, 0);
+    expect(practice.milestoneId, 0);
+  });
+
+  test('a missed good drop fires a miss event and ends the combo', () {
+    final g = CatchGame()..start();
+    g.phase = Phase.playing;
+    g
+      ..goodTotal = 6
+      ..drops.clear()
+      ..drops.addAll([
+        Drop(0, CanKind.superTry, 0, -3.1),
+        Drop(1, CanKind.light, 0, -3.1),
+        Drop(2, CanKind.superTry, 0, -3.1),
+      ]);
+    g.tick(1 / 60);
+    expect(g.combo, 3);
+    expect(g.missId, 0);
+    g.drops.add(Drop(3, CanKind.superTry, 3, -3.1));
+    // Out of reach, but a good drop is only a miss after the grace time.
+    g.tick(1 / 60);
+    expect(g.missId, 0);
+    g.tick(g.catchGrace);
+    expect(g.missId, 1);
+    expect(g.missX, 3);
+    expect(g.lostCombo, 3);
+    expect(g.combo, 0);
+    expect(g.missed, 1);
+    expect(g.inspect()['missX'], 3);
+    // A bad catch also records the combo it ended.
+    g.drops.addAll([
+      Drop(4, CanKind.light, 0, -3.1),
+      Drop(5, CanKind.superTry, 0, -3.1),
+    ]);
+    g.tick(1 / 60);
+    expect(g.combo, 2);
+    g.drops.add(Drop(6, CanKind.happoshu, 0, -3.1));
+    g.tick(1 / 60);
+    expect(g.lostCombo, 2);
+    expect(g.combo, 0);
+    g.start();
+    expect(g.missId, 0);
+    expect(g.missX, isNull);
+    expect(g.lostCombo, 0);
+
+    // Practice shows the miss but counts nothing.
+    final practice = CatchGame()
+      ..practice = true
+      ..start();
+    practice.phase = Phase.playing;
+    practice.drops
+      ..clear()
+      ..add(Drop(0, CanKind.yumemin, 3, -3.1));
+    practice.tick(1 / 60);
+    practice.tick(practice.catchGrace);
+    expect(practice.missId, 1);
+    expect(practice.missed, 0);
+  });
+  test('the closing seconds of a scored round are the hurry', () {
+    final g = CatchGame()..start();
+    expect(g.hurry, false);
+    g.phase = Phase.playing;
+    g.time = g.roundEnd - CatchGame.hurrySeconds - .5;
+    expect(g.hurry, false);
+    expect(g.secondsLeft, CatchGame.hurrySeconds + 1);
+    g.time = g.roundEnd - 2.2;
+    expect(g.hurry, true);
+    expect(g.secondsLeft, 3);
+    expect(g.inspect()['hurry'], true);
+    final practice = CatchGame()
+      ..practice = true
+      ..start();
+    practice.phase = Phase.playing;
+    practice.time = practice.roundEnd - 1;
+    expect(practice.hurry, false);
+  });
 }

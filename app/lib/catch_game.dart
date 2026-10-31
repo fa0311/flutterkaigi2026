@@ -99,6 +99,17 @@ class CatchGame {
   /// final catch instead of on an empty sky.
   static const endBeat = .35;
 
+  /// Combo counts the HUD celebrates with a callout and a chime. The fixed
+  /// layouts allow 9 (Fukugyun) to 13 (Sobaya) good drops in a row.
+  static const comboMilestones = [3, 5, 8, 10];
+
+  /// From this combo the halo and the catch bursts turn gold.
+  static const feverCombo = 5;
+
+  /// Milestones reached by [combo], 0 to [comboMilestones.length].
+  static int tierOf(int combo) =>
+      comboMilestones.where((m) => combo >= m).length;
+
   /// When the round ends: just after the last drop is judged, at most
   /// [roundSeconds]. Set by [start]; practice never ends.
   double roundEnd = duration;
@@ -109,6 +120,26 @@ class CatchGame {
   Phase phase = Phase.ready;
   double time = 0, countdown = 0, x = 0, vx = 0, yaw = 0, targetYaw = 0;
   int score = 0, combo = 0, caught = 0, bad = 0, missed = 0, eventId = 0;
+  int get comboTier => tierOf(combo);
+  bool get fever => combo >= feverCombo;
+
+  /// Longest combo of the round, shown on the result.
+  int bestCombo = 0;
+
+  /// Bumped when [combo] reaches a milestone; [milestoneCombo] is that count.
+  /// Only changes together with [eventId].
+  int milestoneId = 0, milestoneCombo = 0;
+
+  /// Bumped when a good drop lands uncaught; [missX] is where. [lostCombo] is
+  /// the combo a miss or a bad catch has just ended.
+  int missId = 0, lostCombo = 0;
+  double? missX;
+
+  /// The closing seconds of a scored round, when the HUD turns up the heat.
+  static const hurrySeconds = 5;
+  int get secondsLeft => (roundEnd - time).ceil();
+  bool get hurry =>
+      phase == Phase.playing && !practice && roundEnd - time <= hurrySeconds;
 
   /// World X of the latest catch, good or bad. Null until the first catch after
   /// start. Only changes together with [eventId].
@@ -148,6 +179,12 @@ class CatchGame {
     bad = 0;
     missed = 0;
     eventId = 0;
+    bestCombo = 0;
+    milestoneId = 0;
+    milestoneCombo = 0;
+    missId = 0;
+    lostCombo = 0;
+    missX = null;
     fxX = null;
     fxBad = false;
     events.clear();
@@ -282,11 +319,17 @@ class CatchGame {
         final before = score;
         if (d.kind.isBad) {
           bad++;
+          lostCombo = combo;
           combo = 0;
           message = GameMessage.bad;
         } else {
           caught++;
           combo++;
+          bestCombo = math.max(bestCombo, combo);
+          if (comboMilestones.contains(combo)) {
+            milestoneId++;
+            milestoneCombo = combo;
+          }
           message = GameMessage.caught;
         }
         score = _score;
@@ -300,9 +343,14 @@ class CatchGame {
           'score': score,
           'x': x,
         });
-      } else if (!d.kind.isBad && !practice) {
-        missed++;
-        combo = 0;
+      } else if (!d.kind.isBad) {
+        missId++;
+        missX = d.x;
+        lostCombo = combo;
+        if (!practice) {
+          missed++;
+          combo = 0;
+        }
       }
     }
     if (practice) {
@@ -347,6 +395,15 @@ class CatchGame {
     'yaw': yaw,
     'score': score,
     'combo': combo,
+    'comboTier': comboTier,
+    'fever': fever,
+    'bestCombo': bestCombo,
+    'milestoneId': milestoneId,
+    'milestoneCombo': milestoneCombo,
+    'missId': missId,
+    'missX': ?missX,
+    'lostCombo': lostCombo,
+    'hurry': hurry,
     'caught': caught,
     'happoshu': bad,
     'missed': missed,

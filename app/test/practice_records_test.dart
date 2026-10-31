@@ -286,4 +286,102 @@ void main() {
     expect(find.text('b'), findsOneWidget);
     expect(find.text('100点'), findsOneWidget);
   });
+
+  test(
+    'best score per character counts unnamed rounds; best combo is kept',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final store = RecordStore();
+      expect(store.bestScore(CatchCharacter.sobaya), isNull);
+      GameRecord record(int score, CatchCharacter c, {int bestCombo = 0}) =>
+          GameRecord(
+            name: '',
+            score: score,
+            character: c,
+            caught: 0,
+            bad: 0,
+            missed: 0,
+            bestCombo: bestCombo,
+            at: DateTime(2026, 10, 30, 12, score),
+          );
+      await store.add(record(40, CatchCharacter.sobaya, bestCombo: 4));
+      await store.add(record(75, CatchCharacter.sobaya, bestCombo: 9));
+      await store.add(record(90, CatchCharacter.fukuchan));
+      expect(store.bestScore(CatchCharacter.sobaya), 75);
+      expect(store.bestScore(CatchCharacter.fukuchan), 90);
+      expect(store.bestScore(CatchCharacter.ctoOdatetsu), isNull);
+      final reloaded = RecordStore();
+      await reloaded.load();
+      expect(reloaded.records.map((r) => r.bestCombo), [4, 9, 0]);
+      // Records saved before the combo was kept read back as 0.
+      expect(
+        GameRecord.fromMap(
+          record(10, CatchCharacter.sobaya).toMap()..remove('bestCombo'),
+        )?.bestCombo,
+        0,
+      );
+    },
+  );
+
+  testWidgets(
+    'result dialog counts up, stamps the verdict once and shows the ribbons',
+    (tester) async {
+      final record = GameRecord(
+        name: '',
+        score: 100,
+        character: CatchCharacter.sobaya,
+        caught: 13,
+        bad: 0,
+        missed: 0,
+        bestCombo: 13,
+        at: DateTime(2026, 10, 30),
+      );
+      final verdicts = <bool>[];
+      var counts = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (_) => ResultDialog(
+                  record: record,
+                  isBest: true,
+                  onVerdict: verdicts.add,
+                  onCount: () => counts++,
+                ),
+              ),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('open'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      // Still counting: the final score is not on screen yet.
+      expect(find.text('100点'), findsNothing);
+      expect(verdicts, isEmpty);
+      await tester.pumpAndSettle();
+      expect(find.text('100点'), findsOneWidget);
+      expect(find.byKey(const ValueKey('verdict_passed')), findsOneWidget);
+      expect(find.text('最大 13 コンボ'), findsOneWidget);
+      expect(find.text('パーフェクト！'), findsOneWidget);
+      expect(find.text('自己ベスト更新！'), findsOneWidget);
+      expect(verdicts, [true]);
+      // The rank letter is drawn twice: outline and fill.
+      expect(find.text('S'), findsNWidgets(2));
+      expect(counts, greaterThan(0));
+    },
+  );
+
+  test('rank letters: S for a perfect round, then A to D', () {
+    expect(ResultDialog.grade(100), 'S');
+    expect(ResultDialog.grade(99), 'A');
+    expect(ResultDialog.grade(90), 'A');
+    expect(ResultDialog.grade(80), 'B');
+    expect(ResultDialog.grade(79), 'C');
+    expect(ResultDialog.grade(60), 'C');
+    expect(ResultDialog.grade(0), 'D');
+  });
 }

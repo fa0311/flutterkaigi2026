@@ -2,5 +2,16 @@
 
 - `countdown_tick.wav`: 開始前の「3・2・1」。G5（784Hz）に弱い倍音を足した0.22秒の電子音。
 - `countdown_go.wav`: 「スタート！」。1オクターブ上のG6＋D7の和音を0.75秒鳴らす。
+- `catch_1.wav`〜`catch_8.wav`: あたりをキャッチ。C6から始まるペンタトニック（C D E G A C D E）をコンボごとに1段ずつ上がり、8コンボ以降は最高音のまま。0.24秒。
+- `catch_bad.wav`: はずれをキャッチ。240Hzから70Hzへ落ちる矩形波寄りのブザーに、頭だけノイズを足した0.38秒。
+- `miss.wav`: あたりを取り逃し。520Hzから170Hzへ滑り落ちる柔らかい音、0.3秒。
+- `combo_1.wav`〜`combo_4.wav`: 3・5・8・10コンボの節目。上昇するアルペジオで、段階ごとに調が上がる（C→D→E→G）。4段目は和音を残す。
+- `firework.wav`: 節目の花火。低い破裂音とパチパチしたノイズ、0.75秒。
+- `fever_loop.wav`: フィーバー中にループする2秒のリフ。16分音符のメロディ、矩形波のベース、裏拍のハイハット。
+- `hurry.wav`: 残り5秒の各秒。A5（880Hz）の二連チック。
+- `score_tick.wav`: 結果の採点中、10点ごとのチック（2.5kHz、0.05秒）。
+- `result_pass.wav`: 合格。C5-E5-G5-C6の駆け上がりからCメジャーの和音を約1.4秒。
+- `cheer.wav`: 合格のファンファーレに重ねる歓声風のうねり（多数の部分音にゆっくりした振幅変調）、1.8秒。
+- `result_fail.wav`: 不合格。B♭3・A3・A♭3からG3へ沈む悲しいトロンボーン、約2.4秒。
 
-どちらも録音素材を使わず、`app/tool/build_countdown_audio.py`（Python標準ライブラリのみ）で数式から合成した。アプリは `app/assets/audio/` の相対symlinkで参照する。再生成はリポジトリ直下から `python3 app/tool/build_countdown_audio.py`。
+いずれも録音素材を使わず、`app/tool/build_game_audio.py`（Python標準ライブラリのみ）で数式から合成した。アプリは `app/assets/audio/` の相対symlinkで参照する。再生成はリポジトリ直下から `python3 app/tool/build_game_audio.py`。

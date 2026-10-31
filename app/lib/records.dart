@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -16,9 +17,13 @@ class GameRecord {
     required this.bad,
     required this.missed,
     required this.at,
+    this.bestCombo = 0,
   });
   final String name;
   final int score, caught, bad, missed;
+
+  /// Longest run of good catches; 0 on records saved before it was kept.
+  final int bestCombo;
   final CatchCharacter character;
   final DateTime at;
 
@@ -32,6 +37,7 @@ class GameRecord {
     bad: bad,
     missed: missed,
     at: at,
+    bestCombo: bestCombo,
   );
 
   Map<String, Object> toMap() => {
@@ -41,6 +47,7 @@ class GameRecord {
     'caught': caught,
     'bad': bad,
     'missed': missed,
+    'bestCombo': bestCombo,
     'at': at.toIso8601String(),
   };
 
@@ -60,6 +67,7 @@ class GameRecord {
       bad: n('bad'),
       missed: n('missed'),
       at: at,
+      bestCombo: n('bestCombo'),
     );
   }
 }
@@ -128,6 +136,12 @@ class RecordStore {
   /// Every round, newest first.
   List<GameRecord> get history =>
       records.toList()..sort((a, b) => b.at.compareTo(a.at));
+
+  /// Best score of [character] in every round so far, or null before the first.
+  int? bestScore(CatchCharacter character) => records
+      .where((r) => r.character == character)
+      .map((r) => r.score)
+      .fold<int?>(null, (a, b) => a == null ? b : math.max(a, b));
 
   /// 1-based rank among named records; equal scores share the best rank.
   int rankOf(GameRecord record) =>

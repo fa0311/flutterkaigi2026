@@ -28,7 +28,9 @@ import 'catch_game.dart';
 import 'character.dart';
 import 'selection_screen.dart';
 import 'catch_scene.dart';
-import 'countdown_audio.dart';
+import 'confetti.dart';
+import 'game_audio.dart';
+import 'juice.dart';
 import 'tilt_input.dart';
 
 const gold = brandBlue, cream = brandInk, ink = Colors.white;
@@ -89,7 +91,7 @@ class _RainState extends State<RainPage> {
   double inputX = 0, inputY = 0, accumulator = 0, swipe = 0, pinchFrom = 1;
   // Frame-rate HUD toggled from the settings.
   bool showFps = true;
-  final audio = CountdownAudio();
+  final audio = GameAudio();
 
   /// TAS mode replays a perfect input from the next round; a round in it is
   /// [tasRound], and waits until [tasInputs] are found.
@@ -97,7 +99,11 @@ class _RainState extends State<RainPage> {
   List<int>? tasInputs;
   int tasFrame = 0, _tasToken = 0;
   Map<String, Object>? fpsStats;
-  int lastEvent = 0;
+  int lastEvent = 0, lastMilestone = 0, lastMiss = 0, lastSecondsLeft = -1;
+
+  /// Bumped at every "Start!", for the flash and confetti of the kickoff.
+  int goId = 0;
+  bool wasFever = false;
 
   /// Debug override of the character's fixed layout; null plays the fixed one.
   int? seed;
@@ -116,6 +122,10 @@ class _RainState extends State<RainPage> {
       game.bad,
       game.missed,
       game.eventId,
+      game.missId,
+      game.fever,
+      game.hurry,
+      goId,
       game.practice,
     );
     if (mounted && next != _hudState) {
@@ -129,6 +139,7 @@ class _RainState extends State<RainPage> {
   void initState() {
     super.initState();
     tilt.start();
+    audio.warm();
     if (kDebugMode || const bool.fromEnvironment('STAGE_BENCHMARK')) {
       benchmark = StageBenchmark();
     }
@@ -136,7 +147,10 @@ class _RainState extends State<RainPage> {
       onInactive: () {
         if (mounted &&
             (game.phase == Phase.playing || game.phase == Phase.countdown)) {
-          setState(() => paused = true);
+          setState(() {
+            paused = true;
+            pauseEffects();
+          });
         }
       },
     );
@@ -345,6 +359,7 @@ class _RainState extends State<RainPage> {
               game.rotate(int.tryParse(p['direction'] ?? '1') ?? 1);
             case 'pause':
               paused = true;
+              pauseEffects();
             case 'resume':
               paused = false;
               frozen = false;
@@ -637,25 +652,6 @@ class _RainState extends State<RainPage> {
 
   Future<void> showResult() async {
     if (!mounted) return;
-    if (tasRound) {
-      resultOpen = true;
-      await showDialog<void>(
-        context: context,
-        builder: (_) => ResultDialog(
-          record: GameRecord(
-            name: '',
-            score: game.score,
-            character: game.roundCharacter,
-            caught: game.caught,
-            bad: game.bad,
-            missed: game.missed,
-            at: DateTime.now(),
-          ),
-        ),
-      );
-      resultOpen = false;
-      return;
-    }
     final record = GameRecord(
       name: '',
       score: game.score,
@@ -663,19 +659,95 @@ class _RainState extends State<RainPage> {
       caught: game.caught,
       bad: game.bad,
       missed: game.missed,
+      bestCombo: game.bestCombo,
       at: DateTime.now(),
     );
+    if (tasRound) {
+      resultOpen = true;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => ResultDialog(
+          record: record,
+          onVerdict: celebrate,
+          onCount: audio.countTick,
+        ),
+      );
+      resultOpen = false;
+      return;
+    }
+    // Every earlier round of this character on the device, named or not.
+    final bestBefore = records.bestScore(game.roundCharacter);
+    final isBest =
+        record.score > 0 && (bestBefore == null || record.score > bestBefore);
     await records.add(record);
     if (!mounted) return;
     setState(() => lastRecord = record);
     resultOpen = true;
     final named = await showDialog<GameRecord>(
       context: context,
-      builder: (_) =>
-          ResultDialog(record: record, onRecord: () => nameRecord(record)),
+      builder: (_) => ResultDialog(
+        record: record,
+        isBest: isBest,
+        onVerdict: celebrate,
+        onCount: audio.countTick,
+        onRecord: () => nameRecord(record),
+      ),
     );
     resultOpen = false;
     if (named != null && mounted) await openRecords(highlight: named);
+  }
+
+  /// Stops the effects that outlive a frame: the fever riff.
+  void pauseEffects() {
+    wasFever = false;
+    audio.stopFever();
+  }
+
+  /// Lays [child] over everything, dialogs included, until it calls back.
+  void overlayEffect(Widget Function(VoidCallback done) child) {
+    final overlay = Overlay.maybeOf(context);
+    if (overlay == null) return;
+    late final OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => child(() {
+        if (entry.mounted) entry.remove();
+      }),
+    );
+    overlay.insert(entry);
+  }
+
+  /// Sound, haptics and screen effects when the result dialog stamps the
+  /// verdict: a pass gets the fanfare, the crowd, three waves of confetti and
+  /// fireworks; a fail gets the sad trombone and a gloom.
+  void celebrate(bool passed) {
+    if (!mounted) return;
+    audio.verdict(passed: passed);
+    if (!passed) {
+      HapticFeedback.heavyImpact();
+      Future.delayed(
+        const Duration(milliseconds: 350),
+        HapticFeedback.heavyImpact,
+      );
+      overlayEffect(
+        (done) => TintBurst(color: const Color(0xff16394d), onDone: done),
+      );
+      return;
+    }
+    audio.cheer();
+    for (var i = 0; i < 4; i++) {
+      Future.delayed(
+        Duration(milliseconds: 120 * i),
+        HapticFeedback.heavyImpact,
+      );
+    }
+    overlayEffect((done) => FireworksOverlay(onDone: done));
+    for (var wave = 0; wave < 3; wave++) {
+      Future.delayed(Duration(milliseconds: 450 * wave), () {
+        if (mounted) {
+          overlayEffect((done) => ConfettiBurst(seed: 7 + wave, onDone: done));
+        }
+      });
+    }
   }
 
   /// Nickname entry for [record]; null when cancelled.
@@ -711,6 +783,7 @@ class _RainState extends State<RainPage> {
   /// Leaves a practice or a round in progress for the selection screen;
   /// an unfinished round is not recorded.
   void endPractice() {
+    pauseEffects();
     game
       ..practice = false
       ..phase = Phase.ready
@@ -726,7 +799,10 @@ class _RainState extends State<RainPage> {
     final wasPaused = paused;
     final inRound =
         game.phase == Phase.playing || game.phase == Phase.countdown;
-    setState(() => paused = true);
+    setState(() {
+      paused = true;
+      pauseEffects();
+    });
     final r = await showDialog<SettingsResult>(
       context: context,
       barrierDismissible: false,
@@ -792,6 +868,10 @@ class _RainState extends State<RainPage> {
     inputY = 0;
     accumulator = 0;
     lastEvent = 0;
+    lastMilestone = 0;
+    lastMiss = 0;
+    lastSecondsLeft = -1;
+    pauseEffects();
     paused = false;
     frozen = false;
     demo = false;
@@ -860,6 +940,7 @@ class _RainState extends State<RainPage> {
     if (phase == Phase.countdown) {
       if (game.phase == Phase.playing) {
         audio.go();
+        goId++;
       } else if (game.countdown.ceil() != count) {
         audio.tick();
       }
@@ -868,8 +949,45 @@ class _RainState extends State<RainPage> {
       lastEvent = game.eventId;
       if (game.message == GameMessage.bad) {
         HapticFeedback.heavyImpact();
+        audio.catchBad();
       } else {
-        HapticFeedback.selectionClick();
+        HapticFeedback.lightImpact();
+        audio.catchGood(game.combo);
+      }
+    }
+    if (game.milestoneId != lastMilestone) {
+      lastMilestone = game.milestoneId;
+      audio.milestone(game.comboTier);
+      audio.firework();
+      world.launchFireworks(CatchScene.fireworkCount);
+      for (var i = 0; i < 3; i++) {
+        Future.delayed(
+          Duration(milliseconds: 90 * i),
+          HapticFeedback.heavyImpact,
+        );
+      }
+    }
+    if (game.missId != lastMiss) {
+      lastMiss = game.missId;
+      audio.miss();
+      HapticFeedback.selectionClick();
+    }
+    if (game.fever != wasFever) {
+      wasFever = game.fever;
+      if (game.fever) {
+        audio.startFever();
+      } else {
+        audio.stopFever();
+      }
+    }
+    if (game.phase == Phase.playing && !game.practice) {
+      final left = game.secondsLeft;
+      if (left != lastSecondsLeft) {
+        lastSecondsLeft = left;
+        if (left >= 1 && left <= CatchGame.hurrySeconds) {
+          audio.hurry();
+          HapticFeedback.mediumImpact();
+        }
       }
     }
   }
@@ -929,6 +1047,7 @@ class _RainState extends State<RainPage> {
       accumulator -= 1 / 60;
     }
     world.update(game, dt.clamp(0, .1));
+    if (wasFever && game.phase != Phase.playing) pauseEffects();
     checkRoundEnd();
     refreshHud();
   }
@@ -955,6 +1074,30 @@ class _RainState extends State<RainPage> {
     child: Text(
       text,
       style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w600),
+    ),
+  );
+
+  /// The score rolls to each new value and punches on the way.
+  Widget scoreChip(Strings t) => Punch(
+    trigger: game.score,
+    from: 1.22,
+    onMount: false,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: ink.withValues(alpha: .9),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: gold.withValues(alpha: .22)),
+      ),
+      child: RollingNumber(
+        game.score,
+        format: t.points,
+        style: const TextStyle(
+          color: gold,
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
     ),
   );
   Widget button(String text, VoidCallback f, String key) => FilledButton(
@@ -1069,10 +1212,47 @@ class _RainState extends State<RainPage> {
               if (ready)
                 Positioned.fill(
                   child: IgnorePointer(
-                    child: _BadCatchFlash(
+                    child: CatchFlash(
                       eventId: game.eventId,
                       bad: game.fxBad,
+                      fever: game.fever,
                     ),
+                  ),
+                ),
+              if (ready)
+                Positioned.fill(
+                  child: SpeedLines(
+                    active: game.fever && game.phase == Phase.playing,
+                    trigger: game.milestoneId,
+                  ),
+                ),
+              if (ready)
+                Positioned.fill(child: HurryVignette(active: game.hurry)),
+              if (ready)
+                Positioned.fill(
+                  child: FlashOnTrigger(
+                    trigger: goId,
+                    color: Colors.white,
+                    alpha: .75,
+                    duration: const Duration(milliseconds: 350),
+                  ),
+                ),
+              if (ready)
+                Positioned.fill(
+                  child: FlashOnTrigger(
+                    trigger: game.milestoneId,
+                    color: const Color(0xffffc233),
+                    alpha: .5,
+                    duration: const Duration(milliseconds: 420),
+                  ),
+                ),
+              if (ready)
+                Positioned.fill(
+                  child: CatchPopups(
+                    eventId: game.eventId,
+                    missId: game.missId,
+                    game: game,
+                    project: (p) => world.camera.worldToScreen(p, size.biggest),
                   ),
                 ),
               if (error != null) Center(child: Text(error!)),
@@ -1151,13 +1331,19 @@ class _RainState extends State<RainPage> {
                                   ),
                                   const SizedBox(width: 8),
                                 ],
-                                chip(
-                                  t.secondsLeft(
-                                    (game.roundEnd - game.time).ceil(),
+                                Punch(
+                                  trigger: game.secondsLeft,
+                                  from: game.hurry ? 1.4 : 1,
+                                  onMount: false,
+                                  child: chip(
+                                    t.secondsLeft(game.secondsLeft),
+                                    color: game.hurry
+                                        ? const Color(0xffb63c32)
+                                        : cream,
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                chip(t.points(game.score), color: gold),
+                                scoreChip(t),
                               ],
                               IconButton(
                                 key: const ValueKey('settings_open'),
@@ -1169,6 +1355,7 @@ class _RainState extends State<RainPage> {
                                 key: const ValueKey('pause'),
                                 onPressed: () => setState(() {
                                   paused = !paused;
+                                  if (paused) pauseEffects();
                                   if (!paused) tilt.calibrate();
                                 }),
                                 icon: Icon(
@@ -1178,24 +1365,46 @@ class _RainState extends State<RainPage> {
                             ],
                           ),
                         ),
-                        if (playing)
+                        if (game.phase == Phase.playing)
                           Positioned(
                             left: 0,
                             width: 175,
                             top: game.practice ? 100 : 62,
+                            child: Column(
+                              children: [
+                                if (game.time < game.messageUntil)
+                                  chip(
+                                    messageText(t),
+                                    color: game.message == GameMessage.bad
+                                        ? const Color(0xffb63c32)
+                                        : cream,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        if (game.phase == Phase.playing && game.combo > 1)
+                          Positioned(
+                            top: 40,
+                            left: 0,
+                            right: 0,
                             child: Center(
-                              child: game.phase == Phase.countdown
-                                  ? const SizedBox()
-                                  : game.time < game.messageUntil
-                                  ? chip(
-                                      messageText(t),
-                                      color: game.message == GameMessage.bad
-                                          ? const Color(0xffb63c32)
-                                          : cream,
-                                    )
-                                  : game.combo > 1
-                                  ? chip('${game.combo} COMBO', color: gold)
-                                  : const SizedBox(),
+                              child: ComboCounter(
+                                combo: game.combo,
+                                label: t.combo,
+                                fever: game.fever,
+                                feverLabel: t.fever,
+                              ),
+                            ),
+                          ),
+                        if (playing)
+                          Positioned.fill(
+                            child: MilestoneCallout(
+                              trigger: game.milestoneId,
+                              title: t.comboTitle(game.milestoneCombo),
+                              cheer: t.comboCheer(
+                                CatchGame.tierOf(game.milestoneCombo),
+                              ),
+                              tier: CatchGame.tierOf(game.milestoneCombo),
                             ),
                           ),
                         if (playing)
@@ -1205,6 +1414,8 @@ class _RainState extends State<RainPage> {
                                   ? '${game.countdown.ceil()}'
                                   : showGo
                                   ? t.go
+                                  : game.hurry && game.secondsLeft <= 3
+                                  ? '${game.secondsLeft}'
                                   : null,
                             ),
                           ),
@@ -1262,67 +1473,18 @@ class _RainState extends State<RainPage> {
                     ),
                   ),
                 ),
+              if (ready)
+                Positioned.fill(
+                  child: ConfettiOnTrigger(trigger: goId, seed: 3),
+                ),
+              if (ready)
+                Positioned.fill(
+                  child: ConfettiOnTrigger(trigger: game.milestoneId),
+                ),
             ],
           );
         },
       ),
-    );
-  }
-}
-
-/// Edge flash for a bad catch. Ignores pointers so tilt and swipes still land
-/// on the scene underneath.
-class _BadCatchFlash extends StatefulWidget {
-  const _BadCatchFlash({required this.eventId, required this.bad});
-  final int eventId;
-  final bool bad;
-
-  @override
-  State<_BadCatchFlash> createState() => _BadCatchFlashState();
-}
-
-class _BadCatchFlashState extends State<_BadCatchFlash>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 150),
-  );
-
-  @override
-  void didUpdateWidget(_BadCatchFlash oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (widget.eventId != oldWidget.eventId && widget.bad) {
-      _controller.forward(from: 0);
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: _controller,
-      builder: (context, _) {
-        if (_controller.status == AnimationStatus.dismissed) {
-          return const SizedBox.shrink();
-        }
-        final fade = 1 - _controller.value;
-        return DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: RadialGradient(
-              colors: [
-                const Color(0x00b63c32),
-                const Color(0xffb63c32).withValues(alpha: .5 * fade),
-              ],
-              stops: const [.52, 1],
-            ),
-          ),
-        );
-      },
     );
   }
 }

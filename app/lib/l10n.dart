@@ -215,6 +215,55 @@ class Strings {
     return _('これ、${drop(k)}やないか！$p', "That's ${drop(k)}!$p");
   }
 
+  /// Combo counter label and the milestone callouts.
+  String get combo => 'COMBO';
+  String comboTitle(int n) => '$n COMBO!';
+  String comboCheer(int tier) => switch (tier) {
+    <= 1 => _('ええ感じや！', 'Nice streak!'),
+    2 => _('絶好調や！', 'On fire!'),
+    3 => _('もう採用でええやろ！', 'Unstoppable!'),
+    _ => _('伝説級や！', 'Legendary!'),
+  };
+  String get newBest => _('自己ベスト更新！', 'NEW BEST!');
+
+  /// Shouted on every good catch, cycling with the event id.
+  static const _hypeJa = [
+    'ナイス！',
+    'うまい！',
+    'ええぞ！',
+    '天才！',
+    '神！',
+    '採用！',
+    '最高！',
+    'やるやん！',
+    'キレッキレ！',
+    '止まらん！',
+  ];
+  static const _hypeEn = [
+    'NICE!',
+    'SWEET!',
+    'YES!',
+    'GENIUS!',
+    'GODLIKE!',
+    'HIRED!',
+    'SUPERB!',
+    'SLICK!',
+    'ON POINT!',
+    'UNSTOPPABLE!',
+  ];
+  String hype(int i) =>
+      ja ? _hypeJa[i % _hypeJa.length] : _hypeEn[i % _hypeEn.length];
+  static const _booJa = ['ウゲッ！', 'それちゃう！', 'あかん！', 'ちゃうちゃう！'];
+  static const _booEn = ['BLECH!', 'WRONG ONE!', 'NOPE!', 'NOT THAT!'];
+  String boo(int i) =>
+      ja ? _booJa[i % _booJa.length] : _booEn[i % _booEn.length];
+  String get miss => 'MISS';
+  String comboLost(int n) => _('コンボ切れ ×$n', 'COMBO LOST ×$n');
+  String get fever => 'FEVER!!';
+  String get rank => _('ランク', 'RANK');
+  String get perfect => _('パーフェクト！', 'PERFECT!');
+  String bestCombo(int n) => _('最大 $n コンボ', 'Best combo $n');
+
   String get paused => _('ひと休み', 'Paused');
   String get resume => _('持ち方を合わせて再開', 'Hold steady and resume');
   String get backToSelect => _('キャラクター選択に戻る', 'Back to characters');
